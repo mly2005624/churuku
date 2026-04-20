@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>进销存系统（本地+文件同步）</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        *{box-sizing:border-box;font-family:system-ui;margin:0;padding:0}
+        body{background:#f5f7fa;padding:10px}
+        .container{max-width:1000px;margin:0 auto;background:white;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);overflow:hidden}
+        .tabs{display:flex;flex-wrap:wrap;background:#2c3e50}
+        .tab{flex:1;min-width:120px;padding:14px;text-align:center;color:white;cursor:pointer;font-weight:500}
+        .tab.active{background:#3498db}
+        .content{padding:16px;display:none}
+        .content.active{display:block}
+        input,select,textarea{width:100%;padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:6px}
+        button{background:#3498db;color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;margin:2px}
+        button.del{background:#e74c3c}
+        button.import{background:#2ecc71}
+        button.print{background:#f39c12}
+        button.export{background:#9b59b6}
+        button.sync{background:#1abc9c;margin-left:10px}
+        table{width:100%;border-collapse:collapse;margin-top:10px}
+        th,td{border:1px solid #ddd;padding:8px;text-align:center}
+        th{background:#f1f5f9}
+        .title{font-size:18px;font-weight:600;margin-bottom:10px;color:#2c3e50}
+        .search-bar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+        .search-bar input{flex:1;min-width:150px;margin:0}
+        .sync-bar{margin:10px 0;padding:10px;background:#f8f9fa;border-radius:6px}
+        .file-import{display:none}
+        @media print{.tabs,button,.search-bar,.sync-bar{display:none !important}.content{display:block !important}}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab(0)">客户管理</div>
+        <div class="tab" onclick="switchTab(1)">入库管理</div>
+        <div class="tab" onclick="switchTab(2)">出库管理</div>
+        <div class="tab" onclick="switchTab(3)">库存查询</div>
+        <div class="tab" onclick="switchTab(4)">记录查询</div>
+    </div>
+
+    <!-- 数据同步栏 -->
+    <div class="sync-bar">
+        <button class="sync" onclick="exportAllData()">📤 导出全部数据（用于多设备同步）</button>
+        <button class="sync" onclick="importAllData()">📥 导入数据（同步其他设备数据）</button>
+        <span style="color:#666;margin-left:10px">提示：多设备同步请先导出数据，再在另一设备导入</span>
+    </div>
+
+    <div class="content active" id="cust">
+        <div class="title">客户管理</div>
+        <div class="search-bar">
+            <input id="searchCust" placeholder="搜索客户编号/名称/电话" oninput="loadCust()">
+            <button onclick="exportExcel('customers')">导出Excel</button>
+            <button class="print" onclick="printPage()">打印</button>
+            <button class="import" onclick="document.getElementById('importCust').click()">批量导入</button>
+            <input type="file" id="importCust" class="file-import" onchange="importExcel('customers')">
+        </div>
+        <input id="custId" placeholder="客户编号">
+        <input id="custName" placeholder="客户名称">
+        <input id="custContact" placeholder="联系人">
+        <input id="custPhone" placeholder="联系电话">
+        <textarea id="custRemark" placeholder="备注"></textarea>
+        <button onclick="addCustomer()">添加客户</button>
+        <table><thead><tr><th>编号</th><th>名称</th><th>联系人</th><th>电话</th><th>备注</th><th>操作</th></tr></thead><tbody id="custList"></tbody></table>
+    </div>
+
+    <div class="content" id="in">
+        <div class="title">入库管理</div>
+        <div class="search-bar">
+            <input id="searchIn" placeholder="搜索单号/型号/客户" oninput="loadIn()">
+            <button onclick="exportExcel('in')">导出Excel</button>
+            <button class="print" onclick="printPage()">打印</button>
+            <button class="import" onclick="document.getElementById('importIn').click()">批量导入</button>
+            <input type="file" id="importIn" class="file-import" onchange="importExcel('in')">
+        </div>
+        <input id="inNo" placeholder="入库单号">
+        <input id="inTime" type="datetime-local">
+        <select id="inCust"></select>
+        <input id="inModel" placeholder="产品型号">
+        <input id="inColor" placeholder="颜色">
+        <input id="inSpec" placeholder="规格">
+        <input id="inNum" type="number" placeholder="数量" min="1">
+        <textarea id="inRemark" placeholder="备注"></textarea>
+        <button onclick="addIn()">确认入库</button>
+        <table><thead><tr><th>单号</th><th>时间</th><th>客户</th><th>型号</th><th>颜色</th><th>规格</th><th>数量</th><th>备注</th><th>操作</th></tr></thead><tbody id="inList"></tbody></table>
+    </div>
+
+    <div class="content" id="out">
+        <div class="title">出库管理</div>
+        <div class="search-bar">
+            <input id="searchOut" placeholder="搜索单号/型号/客户" oninput="loadOut()">
+            <button onclick="exportExcel('out')">导出Excel</button>
+            <button class="print" onclick="printPage()">打印</button>
+            <button class="import" onclick="document.getElementById('importOut').click()">批量导入</button>
+            <input type="file" id="importOut" class="file-import" onchange="importExcel('out')">
+        </div>
+        <input id="outNo" placeholder="出库单号">
+        <input id="outTime" type="datetime-local">
+        <select id="outCust"></select>
+        <input id="outModel" placeholder="产品型号">
+        <input id="outColor" placeholder="颜色">
+        <input id="outSpec" placeholder="规格">
+        <input id="outNum" type="number" placeholder="数量" min="1">
+        <textarea id="outRemark" placeholder="备注"></textarea>
+        <button onclick="addOut()">确认出库</button>
+        <table><thead><tr><th>单号</th><th>时间</th><th>客户</th><th>型号</th><th>颜色</th><th>规格</th><th>数量</th><th>备注</th><th>操作</th></tr></thead><tbody id="outList"></tbody></table>
+    </div>
+
+    <div class="content" id="stock">
+        <div class="title">实时库存</div>
+        <div class="search-bar">
+            <input id="searchStock" placeholder="搜索型号/颜色/规格" oninput="loadStock()">
+            <button onclick="exportExcel('stock')">导出Excel</button>
+            <button class="print" onclick="printPage()">打印</button>
+        </div>
+        <table><thead><tr><th>型号</th><th>颜色</th><th>规格</th><th>总入库</th><th>总出库</th><th>当前库存</th></tr></thead><tbody id="stockList"></tbody></table>
+    </div>
+
+    <div class="content" id="log">
+        <div class="title">入库/出库记录</div>
+        <div class="search-bar">
+            <input id="searchLog" placeholder="搜索类型/单号/客户" oninput="loadLog()">
+            <button onclick="exportExcel('log')">导出Excel</button>
+            <button class="print" onclick="printPage()">打印</button>
+        </div>
+        <table><thead><tr><th>类型</th><th>单号</th><th>时间</th><th>客户</th><th>型号</th><th>颜色</th><th>规格</th><th>数量</th></tr></thead><tbody id="logList"></tbody></table>
+    </div>
+</div>
+
+<script>
+// 本地存储核心方法（100%兼容所有设备）
+const Storage = {
+    // 读取数据
+    get(key) {
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : {};
+    },
+    // 保存数据
+    set(key, data) {
+        localStorage.setItem(key, JSON.stringify(data));
+    },
+    // 添加单条数据
+    add(key, item) {
+        const data = this.get(key);
+        const id = Date.now().toString();
+        data[id] = item;
+        this.set(key, data);
+        return id;
+    },
+    // 删除单条数据
+    remove(key, id) {
+        const data = this.get(key);
+        delete data[id];
+        this.set(key, data);
+    }
+};
+
+let tabIdx = 0;
+
+// 切换标签页
+function switchTab(i) {
+    document.querySelectorAll('.content').forEach((c, j) => c.classList.toggle('active', j === i));
+    document.querySelectorAll('.tab').forEach((t, j) => t.classList.toggle('active', j === i));
+    tabIdx = i;
+    if (i === 0) loadCust();
+    if (i === 1) { loadCustSelect('inCust'); loadIn(); }
+    if (i === 2) { loadCustSelect('outCust'); loadOut(); }
+    if (i === 3) loadStock();
+    if (i === 4) loadLog();
+}
+
+// ---------------------- 客户管理 ----------------------
+function addCustomer() {
+    const code = document.getElementById('custId').value.trim();
+    const name = document.getElementById('custName').value.trim();
+    if (!code || !name) {
+        alert('请填写客户编号和名称！');
+        return;
+    }
+    // 添加到本地存储
+    Storage.add('customers', {
+        code,
+        name,
+        contact: document.getElementById('custContact').value.trim(),
+        phone: document.getElementById('custPhone').value.trim(),
+        remark: document.getElementById('custRemark').value.trim()
+    });
+    // 清空表单
+    document.getElementById('custId').value = '';
+    document.getElementById('custName').value = '';
+    document.getElementById('custContact').value = '';
+    document.getElementById('custPhone').value = '';
+    document.getElementById('custRemark').value = '';
+    // 重新加载列表
+    loadCust();
+    alert('客户添加成功！');
+}
+
+function loadCust() {
+    const key = document.getElementById('searchCust').value.toLowerCase();
+    const customers = Storage.get('customers');
+    let list = Object.entries(customers).map(([id, item]) => ({ id, ...item }));
+    // 搜索过滤
+    if (key) {
+        list = list.filter(item => 
+            item.code.toLowerCase().includes(key) || 
+            item.name.toLowerCase().includes(key) || 
+            (item.phone && item.phone.toLowerCase().includes(key))
+        );
+    }
+    // 按时间倒序
+    list.sort((a, b) => b.id - a.id);
+    // 渲染表格
+    const custList = document.getElementById('custList');
+    if (list.length === 0) {
+        custList.innerHTML = '<tr><td colspan="6">暂无客户数据</td></tr>';
+        return;
+    }
+    custList.innerHTML = list.map(item => `
+        <tr>
+            <td>${item.code}</td>
+            <td>${item.name}</td>
+            <td>${item.contact || '-'}</td>
+            <td>${item.phone || '-'}</td>
+            <td>${item.remark || '-'}</td>
+            <td><button class="del" onclick="delCust('${item.id}')">删除</button></td>
+        </tr>
+    `).join('');
+}
+
+function delCust(id) {
+    if (!confirm('确定删除该客户吗？删除后关联的入库/出库记录不会删除')) return;
+    Storage.remove('customers', id);
+    loadCust();
+    // 刷新入库/出库的客户下拉框
+    loadCustSelect('inCust');
+    loadCustSelect('outCust');
+}
+
+// ---------------------- 入库管理 ----------------------
+function loadCustSelect(selectId) {
+    const select = document.getElementById(selectId);
+    const customers = Storage.get('customers');
+    const list = Object.values(customers);
+    if (list.length === 0) {
+        select.innerHTML = '<option value="">暂无客户</option>';
+        return;
+    }
+    select.innerHTML = '<option value="">选择客户</option>' + 
+        list.map(item => `<option value="${item.name}">${item.name}</option>`).join('');
+}
+
+function addIn() {
+    const no = document.getElementById('inNo').value.trim();
+    const time = document.getElementById('inTime').value;
+    const cust = document.getElementById('inCust').value;
+    const model = document.getElementById('inModel').value.trim();
+    const num = parseInt(document.getElementById('inNum').value || 0);
+    
+    if (!no || !time || !cust || !model || num <= 0) {
+        alert('请填写完整入库信息，数量必须大于0！');
+        return;
+    }
+    // 添加到本地存储
+    Storage.add('inRecords', {
+        no,
+        time,
+        cust,
+        model,
+        color: document.getElementById('inColor').value.trim() || '-',
+        spec: document.getElementById('inSpec').value.trim() || '-',
+        num,
+        remark: document.getElementById('inRemark').value.trim() || '-'
+    });
+    // 清空表单
+    document.getElementById('inNo').value = '';
+    document.getElementById('inTime').value = '';
+    document.getElementById('inCust').value = '';
+    document.getElementById('inModel').value = '';
+    document.getElementById('inColor').value = '';
+    document.getElementById('inSpec').value = '';
+    document.getElementById('inNum').value = '';
+    document.getElementById('inRemark').value = '';
+    // 重新加载列表
+    loadIn();
+    loadStock();
+    loadLog();
+    alert('入库记录添加成功！');
+}
+
+function loadIn() {
+    const key = document.getElementById('searchIn').value.toLowerCase();
+    const inRecords = Storage.get('inRecords');
+    let list = Object.entries(inRecords).map(([id, item]) => ({ id, ...item }));
+    // 搜索过滤
+    if (key) {
+        list = list.filter(item => 
+            item.no.toLowerCase().includes(key) || 
+            item.model.toLowerCase().includes(key) || 
+            item.cust.toLowerCase().includes(key)
+        );
+    }
+    // 按时间倒序
+    list.sort((a, b) => b.id - a.id);
+    // 渲染表格
+    const inList = document.getElementById('inList');
+    if (list.length === 0) {
+        inList.innerHTML = '<tr><td colspan="9">暂无入库数据</td></tr>';
+        return;
+    }
+    inList.innerHTML = list.map(item => `
+        <tr>
+            <td>${item.no}</td>
+            <td>${item.time}</td>
+            <td>${item.cust}</td>
+            <td>${item.model}</td>
+            <td>${item.color}</td>
+            <td>${item.spec}</td>
+            <td>${item.num}</td>
+            <td>${item.remark}</td>
+            <td><button class="del" onclick="delIn('${item.id}')">删除</button></td>
+        </tr>
+    `).join('');
+}
+
+function delIn(id) {
+    if (!confirm('确定删除该入库记录吗？库存会同步更新')) return;
+    Storage.remove('inRecords', id);
+    loadIn();
+    loadStock();
+    loadLog();
+}
+
+// ---------------------- 出库管理 ----------------------
+function addOut() {
+    const no = document.getElementById('outNo').value.trim();
+    const time = document.getElementById('outTime').value;
+    const cust = document.getElementById('outCust').value;
+    const model = document.getElementById('outModel').value.trim();
+    const num = parseInt(document.getElementById('outNum').value || 0);
+    
+    if (!no || !time || !cust || !model || num <= 0) {
+        alert('请填写完整出库信息，数量必须大于0！');
+        return;
+    }
+    // 添加到本地存储
+    Storage.add('outRecords', {
+        no,
+        time,
+        cust,
+        model,
+        color: document.getElementById('outColor').value.trim() || '-',
+        spec: document.getElementById('outSpec').value.trim() || '-',
+        num,
+        remark: document.getElementById('outRemark').value.trim() || '-'
+    });
+    // 清空表单
+    document.getElementById('outNo').value = '';
+    document.getElementById('outTime').value = '';
+    document.getElementById('outCust').value = '';
+    document.getElementById('outModel').value = '';
+    document.getElementById('outColor').value = '';
+    document.getElementById('outSpec').value = '';
+    document.getElementById('outNum').value = '';
+    document.getElementById('outRemark').value = '';
+    // 重新加载列表
+    loadOut();
+    loadStock();
+    loadLog();
+    alert('出库记录添加成功！');
+}
+
+function loadOut() {
+    const key = document.getElementById('searchOut').value.toLowerCase();
+    const outRecords = Storage.get('outRecords');
+    let list = Object.entries(outRecords).map(([id, item]) => ({ id, ...item }));
+    // 搜索过滤
+    if (key) {
+        list = list.filter(item => 
+            item.no.toLowerCase().includes(key) || 
+            item.model.toLowerCase().includes(key) || 
+            item.cust.toLowerCase().includes(key)
+        );
+    }
+    // 按时间倒序
+    list.sort((a, b) => b.id - a.id);
+    // 渲染表格
+    const outList = document.getElementById('outList');
+    if (list.length === 0) {
+        outList.innerHTML = '<tr><td colspan="9">暂无出库数据</td></tr>';
+        return;
+    }
+    outList.innerHTML = list.map(item => `
+        <tr>
+            <td>${item.no}</td>
+            <td>${item.time}</td>
+            <td>${item.cust}</td>
+            <td>${item.model}</td>
+            <td>${item.color}</td>
+            <td>${item.spec}</td>
+            <td>${item.num}</td>
+            <td>${item.remark}</td>
+            <td><button class="del" onclick="delOut('${item.id}')">删除</button></td>
+        </tr>
+    `).join('');
+}
+
+function delOut(id) {
+    if (!confirm('确定删除该出库记录吗？库存会同步更新')) return;
+    Storage.remove('outRecords', id);
+    loadOut();
+    loadStock();
+    loadLog();
+}
+
+// ---------------------- 库存查询 ----------------------
+function loadStock() {
+    const key = document.getElementById('searchStock').value.toLowerCase();
+    const inRecords = Object.values(Storage.get('inRecords'));
+    const outRecords = Object.values(Storage.get('outRecords'));
+    
+    // 计算库存
+    const stockMap = {};
+    // 累加入库
+    inRecords.forEach(item => {
+        const key = `${item.model}|${item.color}|${item.spec}`;
+        if (!stockMap[key]) {
+            stockMap[key] = {
+                model: item.model,
+                color: item.color,
+                spec: item.spec,
+                in: 0,
+                out: 0
+            };
+        }
+        stockMap[key].in += item.num;
+    });
+    // 累减出库
+    outRecords.forEach(item => {
+        const key = `${item.model}|${item.color}|${item.spec}`;
+        if (stockMap[key]) {
+            stockMap[key].out += item.num;
+        } else {
+            stockMap[key] = {
+                model: item.model,
+                color: item.color,
+                spec: item.spec,
+                in: 0,
+                out: item.num
+            };
+        }
+    });
+    
+    // 转换为列表并计算当前库存
+    let stockList = Object.values(stockMap).map(item => ({
+        ...item,
+        current: item.in - item.out
+    }));
+    
+    // 搜索过滤
+    if (key) {
+        stockList = stockList.filter(item => 
+            item.model.toLowerCase().includes(key) || 
+            item.color.toLowerCase().includes(key) || 
+            item.spec.toLowerCase().includes(key)
+        );
+    }
+    
+    // 渲染表格
+    const stockListEl = document.getElementById('stockList');
+    if (stockList.length === 0) {
+        stockListEl.innerHTML = '<tr><td colspan="6">暂无库存数据</td></tr>';
+        return;
+    }
+    stockListEl.innerHTML = stockList.map(item => `
+        <tr>
+            <td>${item.model}</td>
+            <td>${item.color}</td>
+            <td>${item.spec}</td>
+            <td>${item.in}</td>
+            <td>${item.out}</td>
+            <td>${item.current}</td>
+        </tr>
+    `).join('');
+}
+
+// ---------------------- 记录查询 ----------------------
+function loadLog() {
+    const key = document.getElementById('searchLog').value.toLowerCase();
+    const inRecords = Object.entries(Storage.get('inRecords')).map(([id, item]) => ({
+        ...item,
+        id,
+        type: '入库'
+    }));
+    const outRecords = Object.entries(Storage.get('outRecords')).map(([id, item]) => ({
+        ...item,
+        id,
+        type: '出库'
+    }));
+    
+    // 合并并排序
+    let allRecords = [...inRecords, ...outRecords].sort((a, b) => b.id - a.id);
+    
+    // 搜索过滤
+    if (key) {
+        allRecords = allRecords.filter(item => 
+            item.type.toLowerCase().includes(key) || 
+            item.no.toLowerCase().includes(key) || 
+            item.cust.toLowerCase().includes(key)
+        );
+    }
+    
+    // 渲染表格
+    const logList = document.getElementById('logList');
+    if (allRecords.length === 0) {
+        logList.innerHTML = '<tr><td colspan="8">暂无入库/出库记录</td></tr>';
+        return;
+    }
+    logList.innerHTML = allRecords.map(item => `
+        <tr>
+            <td>${item.type}</td>
+            <td>${item.no}</td>
+            <td>${item.time}</td>
+            <td>${item.cust}</td>
+            <td>${item.model}</td>
+            <td>${item.color}</td>
+            <td>${item.spec}</td>
+            <td>${item.num}</td>
+        </tr>
+    `).join('');
+}
+
+// ---------------------- Excel导出/导入 ----------------------
+function exportExcel(type) {
+    let headers = [];
+    let data = [];
+    
+    switch (type) {
+        case 'customers':
+            headers = ['客户编号', '客户名称', '联系人', '电话', '备注'];
+            data = Object.values(Storage.get('customers')).map(item => [
+                item.code, item.name, item.contact || '-', item.phone || '-', item.remark || '-'
+            ]);
+            break;
+        case 'in':
+            headers = ['入库单号', '时间', '客户', '型号', '颜色', '规格', '数量', '备注'];
+            data = Object.values(Storage.get('inRecords')).map(item => [
+                item.no, item.time, item.cust, item.model, item.color, item.spec, item.num, item.remark
+            ]);
+            break;
+        case 'out':
+            headers = ['出库单号', '时间', '客户', '型号', '颜色', '规格', '数量', '备注'];
+            data = Object.values(Storage.get('outRecords')).map(item => [
+                item.no, item.time, item.cust, item.model, item.color, item.spec, item.num, item.remark
+            ]);
+            break;
+        case 'stock':
+            headers = ['型号', '颜色', '规格', '总入库', '总出库', '当前库存'];
+            const stockMap = {};
+            Object.values(Storage.get('inRecords')).forEach(item => {
+                const key = `${item.model}|${item.color}|${item.spec}`;
+                if (!stockMap[key]) stockMap[key] = { in:0, out:0, ...item };
+                stockMap[key].in += item.num;
+            });
+            Object.values(Storage.get('outRecords')).forEach(item => {
+                const key = `${item.model}|${item.color}|${item.spec}`;
+                if (!stockMap[key]) stockMap[key] = { in:0, out:0, ...item };
+                stockMap[key].out += item.num;
+            });
+            data = Object.values(stockMap).map(item => [
+                item.model, item.color, item.spec, item.in, item.out, item.in - item.out
+            ]);
+            break;
+        case 'log':
+            headers = ['类型', '单号', '时间', '客户', '型号', '颜色', '规格', '数量'];
+            const inLog = Object.values(Storage.get('inRecords')).map(item => [
+                '入库', item.no, item.time, item.cust, item.model, item.color, item.spec, item.num
+            ]);
+            const outLog = Object.values(Storage.get('outRecords')).map(item => [
+                '出库', item.no, item.time, item.cust, item.model, item.color, item.spec, item.num
+            ]);
+            data = [...inLog, ...outLog];
+            break;
+    }
+    
+    // 生成Excel
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, type);
+    XLSX.writeFile(wb, `进销存_${type}_${new Date().getTime()}.xlsx`);
+}
+
+function importExcel(type) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const wb = XLSX.read(e.target.result);
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        if (data.length <= 1) { // 只有表头
+            alert('导入的Excel无数据！');
+            return;
+        }
+        
+        // 移除表头
+        data.shift();
+        
+        switch (type) {
+            case 'customers':
+                data.forEach(row => {
+                    if (row[0] && row[1]) { // 编号和名称不为空
+                        Storage.add('customers', {
+                            code: row[0].toString().trim(),
+                            name: row[1].toString().trim(),
+                            contact: row[2] ? row[2].toString().trim() : '',
+                            phone: row[3] ? row[3].toString().trim() : '',
+                            remark: row[4] ? row[4].toString().trim() : ''
+                        });
+                    }
+                });
+                loadCust();
+                loadCustSelect('inCust');
+                loadCustSelect('outCust');
+                break;
+            case 'in':
+                data.forEach(row => {
+                    if (row[0] && row[1] && row[2] && row[3] && row[6]) { // 关键字段不为空
+                        Storage.add('inRecords', {
+                            no: row[0].toString().trim(),
+                            time: row[1].toString().trim(),
+                            cust: row[2].toString().trim(),
+                            model: row[3].toString().trim(),
+                            color: row[4] ? row[4].toString().trim() : '-',
+                            spec: row[5] ? row[5].toString().trim() : '-',
+                            num: parseInt(row[6]) || 1,
+                            remark: row[7] ? row[7].toString().trim() : '-'
+                        });
+                    }
+                });
+                loadIn();
+                loadStock();
+                loadLog();
+                break;
+            case 'out':
+                data.forEach(row => {
+                    if (row[0] && row[1] && row[2] && row[3] && row[6]) { // 关键字段不为空
+                        Storage.add('outRecords', {
+                            no: row[0].toString().trim(),
+                            time: row[1].toString().trim(),
+                            cust: row[2].toString().trim(),
+                            model: row[3].toString().trim(),
+                            color: row[4] ? row[4].toString().trim() : '-',
+                            spec: row[5] ? row[5].toString().trim() : '-',
+                            num: parseInt(row[6]) || 1,
+                            remark: row[7] ? row[7].toString().trim() : '-'
+                        });
+                    }
+                });
+                loadOut();
+                loadStock();
+                loadLog();
+                break;
+        }
+        
+        alert('导入成功！');
+        event.target.value = '';
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// ---------------------- 全数据导出/导入（多设备同步） ----------------------
+function exportAllData() {
+    const allData = {
+        customers: Storage.get('customers'),
+        inRecords: Storage.get('inRecords'),
+        outRecords: Storage.get('outRecords')
+    };
+    const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `进销存全数据_${new Date().getTime()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    alert('全部数据导出成功！请将此文件复制到其他设备进行导入');
+}
+
+function importAllData() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const allData = JSON.parse(e.target.result);
+                // 覆盖本地数据
+                Storage.set('customers', allData.customers || {});
+                Storage.set('inRecords', allData.inRecords || {});
+                Storage.set('outRecords', allData.outRecords || {});
+                
+                // 刷新所有页面
+                loadCust();
+                loadCustSelect('inCust');
+                loadCustSelect('outCust');
+                loadIn();
+                loadOut();
+                loadStock();
+                loadLog();
+                
+                alert('数据导入成功！所有设备数据已同步');
+            } catch (err) {
+                alert('导入失败：文件格式错误！');
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+// 打印功能
+function printPage() {
+    window.print();
+}
+
+// 初始化加载客户列表
+loadCust();
+</script>
+</body>
+</html>
